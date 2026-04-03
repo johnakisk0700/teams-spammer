@@ -108,6 +108,43 @@ export async function sendDirectMessage(
   });
 }
 
+export async function sendChatMessage(
+  accessToken: string,
+  chatId: string,
+  messageHtml: string,
+): Promise<void> {
+  await graphFetch(accessToken, `/chats/${chatId}/messages`, "POST", {
+    body: {
+      contentType: "html",
+      content: messageHtml,
+    },
+  });
+}
+
+export type GraphChat = {
+  id: string;
+  topic: string | null;
+  chatType: "oneOnOne" | "group" | "meeting";
+};
+
+export async function listMyChats(accessToken: string): Promise<GraphChat[]> {
+  const res = await graphFetch<GraphResponse<GraphChat>>(accessToken, "/me/chats?$top=50");
+  return res.value;
+}
+
+export async function listChatMembers(accessToken: string, chatId: string): Promise<GraphUser[]> {
+  const res = await graphFetch<GraphResponse<GraphUser & { "@odata.type"?: string }>>(
+    accessToken,
+    `/chats/${chatId}/members`,
+  );
+  return res.value.map((m) => ({
+    id: m.id,
+    displayName: m.displayName,
+    mail: m.mail,
+    userPrincipalName: m.userPrincipalName,
+  }));
+}
+
 export async function getMe(accessToken: string): Promise<GraphUser> {
   return graphFetch<GraphUser>(accessToken, "/me");
 }

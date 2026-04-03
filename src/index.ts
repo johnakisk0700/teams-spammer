@@ -1,14 +1,15 @@
 import { fetchOpenPullRequests } from './bitbucket/client.ts';
 import { getPullRequestLink } from './bitbucket/format.ts';
 import { getAccessToken } from './teams/auth.ts';
-import { sendChannelMessage, sendDirectMessage } from './teams/client.ts';
+import { sendChannelMessage, sendChatMessage, sendDirectMessage } from './teams/client.ts';
 import { env } from './config/env.ts';
-import { channels } from './config/channels.ts';
+import { targets } from './config/channels.ts';
 import { getRandomReviewTitle } from './review-title.ts';
 
 type Target =
   | { mode: 'dm'; email: string }
-  | { mode: 'channel'; teamId: string; channelId: string };
+  | { mode: 'channel'; teamId: string; channelId: string }
+  | { mode: 'chat'; chatId: string };
 
 type ParsedArgs = {
   target: Target;
@@ -35,37 +36,44 @@ function parseArgs(): ParsedArgs {
     return { target: { mode: 'dm', email: rest[0] }, alsoSlug };
   }
 
-  if (mode === 'channel' && rest[0]) {
-    const alias = channels[rest[0]];
-    if (alias) {
-      return {
-        target: { mode: 'channel', teamId: alias.teamId, channelId: alias.channelId },
-        alsoSlug,
-      };
+  // Check predefined targets (channels or group chats)
+  if (mode === 'to' && rest[0]) {
+    const t = targets[rest[0]];
+    if (t) {
+      const target: Target =
+        t.type === 'chat'
+          ? { mode: 'chat', chatId: t.chatId }
+          : { mode: 'channel', teamId: t.teamId, channelId: t.channelId };
+      return { target, alsoSlug };
     }
 
-    if (rest[1]) {
-      return { target: { mode: 'channel', teamId: rest[0], channelId: rest[1] }, alsoSlug };
-    }
-
-    console.error(`Unknown channel alias "${rest[0]}" and no channelId provided.`);
-    console.error(`Define it in src/config/channels.ts or pass both IDs.\n`);
+    console.error(`Unknown target "${rest[0]}".`);
+    console.error(`Define it in src/config/channels.ts.\n`);
   }
 
-  const aliases = Object.keys(channels);
+  if (mode === 'channel' && rest[0] && rest[1]) {
+    return { target: { mode: 'channel', teamId: rest[0], channelId: rest[1] }, alsoSlug };
+  }
+
+  if (mode === 'chat' && rest[0]) {
+    return { target: { mode: 'chat', chatId: rest[0] }, alsoSlug };
+  }
+
+  const aliases = Object.keys(targets);
   const aliasHelp = aliases.length
-    ? `\nPredefined channels:\n${aliases.map((a) => `  - ${a}`).join('\n')}\n`
-    : '\nNo predefined channels yet. Add them in src/config/channels.ts\n';
+    ? `\nPredefined targets:\n${aliases.map((a) => `  - ${a}`).join('\n')}\n`
+    : '\nNo predefined targets yet. Add them in src/config/channels.ts\n';
 
   console.error(`Usage:
   bun run start dm <email>                     Send a DM to a user
-  bun run start channel <alias>                Post to a predefined channel
+  bun run start to <alias>                     Send to a predefined target
   bun run start channel <teamId> <channelId>   Post to a channel by IDs
+  bun run start chat <chatId>                  Post to a group chat by ID
 
 Options:
   --also <slug>   Also include PRs by another Bitbucket user
 ${aliasHelp}
-Tip: use "bun run explore" to discover team/channel IDs.`);
+Tip: use "bun run explore" to discover IDs.`);
   process.exit(1);
 }
 
@@ -134,9 +142,12 @@ async function main(): Promise<void> {
   if (target.mode === 'dm') {
     console.log(`\nSending DM to ${target.email}...`);
     await sendDirectMessage(token, target.email, message);
-  } else {
+  } else if (target.mode === 'channel') {
     console.log(`\nPosting to channel ${target.channelId}...`);
     await sendChannelMessage(token, target.teamId, target.channelId, message);
+  } else {
+    console.log(`\nPosting to group chat ${target.chatId}...`);
+    await sendChatMessage(token, target.chatId, message);
   }
 
   console.log('Sent!');

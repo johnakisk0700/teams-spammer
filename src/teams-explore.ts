@@ -4,8 +4,8 @@ import {
   listMyTeams,
   listChannels,
   listTeamMembers,
-  sendChannelMessage,
-  sendDirectMessage,
+  listMyChats,
+  listChatMembers,
 } from "./teams/client.ts";
 import { env } from "./config/env.ts";
 
@@ -20,14 +20,18 @@ for (const [i, team] of teams.entries()) {
   console.log(`  [${i}] ${team.displayName} (${team.id})`);
 }
 
-// Pick the first team to explore (or change the index)
 if (teams.length === 0) {
   console.log("No teams found.");
   process.exit(0);
 }
 
-const teamIndex = 0;
-const team = teams[teamIndex];
+const teamIndex = Number(Bun.argv[2] ?? 0);
+if (isNaN(teamIndex) || teamIndex < 0 || teamIndex >= teams.length) {
+  console.error(`Invalid team index. Use 0-${teams.length - 1}`);
+  process.exit(1);
+}
+
+const team = teams[teamIndex]!;
 console.log(`\nExploring team: ${team.displayName}\n`);
 
 const channels = await listChannels(token, team.id);
@@ -44,4 +48,29 @@ try {
   }
 } catch {
   console.log("\nMembers: (no permission to list — need TeamMember.Read.All)");
+}
+
+// List group chats
+console.log("\n--- Group Chats ---\n");
+try {
+  const chats = await listMyChats(token);
+  const groupChats = chats.filter((c) => c.chatType === "group");
+
+  if (groupChats.length === 0) {
+    console.log("No group chats found.");
+  } else {
+    for (const [i, chat] of groupChats.entries()) {
+      const label = chat.topic || "(no topic)";
+      console.log(`  [${i}] ${label} (${chat.id})`);
+      try {
+        const members = await listChatMembers(token, chat.id);
+        const names = members.map((m) => m.displayName).join(", ");
+        console.log(`      Members: ${names}`);
+      } catch {
+        // skip if no permission
+      }
+    }
+  }
+} catch (e) {
+  console.log(`Could not list chats: ${e}`);
 }
