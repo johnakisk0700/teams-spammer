@@ -9,31 +9,34 @@ import {
 } from '../../../microsoft-teams/client';
 import { getRandomReviewTitle } from './review-title';
 
-export type PRsWithApprovals = {
+export type PRWithStatus = {
   pr: BitbucketPullRequest;
   approvals: number;
-}[];
+  status: 'review' | 'qa';
+};
 
-export async function filterByApprovalThreshold(
+export function filterByApprovalThreshold(
   pullRequests: BitbucketPullRequest[],
   config: PrReviewSpammerJob,
-): Promise<[PRsWithApprovals, PRsWithApprovals]> {
+): PRWithStatus[] {
   const threshold = config.approvalThreshold ?? env.APPROVAL_THRESHOLD;
   const qaThreshold = config.qaThreshold ?? env.QA_THRESHOLD;
 
-  const prsWithApprovals: PRsWithApprovals = pullRequests.map((pr) => {
+  const results: PRWithStatus[] = [];
+
+  for (const pr of pullRequests) {
     const approvals = pr.reviewers.filter(
       (r) => r.approved && r.user.slug !== pr.author.user.slug,
     ).length;
-    return { pr, approvals };
-  });
 
-  const needsReview = prsWithApprovals.filter((p) => p.approvals < qaThreshold) || [];
-  const needsQa = prsWithApprovals.filter(
-    (p) => p.approvals >= qaThreshold && p.approvals < threshold,
-  );
+    if (approvals < qaThreshold) {
+      results.push({ pr, approvals, status: 'review' });
+    } else if (approvals < threshold) {
+      results.push({ pr, approvals, status: 'qa' });
+    }
+  }
 
-  return [needsReview, needsQa] as const;
+  return results.sort((a, b) => a.approvals - b.approvals);
 }
 
 export function getMessageTitle(tone: JobConfig['tone']) {
@@ -59,30 +62,18 @@ export async function sendTeamsMessage(target: JobConfig['target'], message: str
   }
 }
 
-export function createNeedsReviewLines(needsReview: PRsWithApprovals) {
-  if (!needsReview.length) return [];
-
-  const lines = [];
-  for (const { pr, approvals } of needsReview) {
-    const link = getPullRequestLink(pr);
-    lines.push(
-      `\u2022 <a href="${link}">#${pr.id} ${pr.title}</a> \u2014 ${approvals}/${env.QA_THRESHOLD} approvals`,
-    );
-  }
-
-  return lines;
+function reviewHearts(current: number, total: number): string {
+  return '\uD83D\uDC9A'.repeat(current) + '\uD83E\uDD0D'.repeat(Math.max(0, total - current));
 }
 
-export function createNeedsQALines(needsReview: PRsWithApprovals) {
-  if (!needsReview.length) return [];
-
-  const lines = [];
-  for (const { pr, approvals } of needsReview) {
-    const link = getPullRequestLink(pr);
-    lines.push(
-      `\u2022 <a href="${link}">#${pr.id} ${pr.title}</a> \u2014 ${approvals}/${env.APPROVAL_THRESHOLD} approvals \u2014 QA needed`,
-    );
+export function createPrLine(entry: PRWithStatus): string {
+  const { pr, approvals, status } = entry;
+  const link = getPullRequestLink(pr);
+  const hearts = reviewHearts(approvals, env.QA_THRESHOLD);
+  if (status === 'review') {
+    return `\uD83D\uDD0D \u23D0 ${hearts} \u25B8 \u26AA \u2014 <a href="${link}">#${pr.id} ${pr.title}</a>`;
   }
-
-  return lines;
+  const qaApprovals = approvals - env.QA_THRESHOLD;
+  const qaSlot = qaApprovals > 0 ? '\uD83D\uDFE2' : '\uD83D\uDFE1';
+  return `\uD83E\uDDEA \u23D0 ${hearts} \u25B8 ${qaSlot} \u2014 <a href="${link}">#${pr.id} ${pr.title}</a>`;
 }

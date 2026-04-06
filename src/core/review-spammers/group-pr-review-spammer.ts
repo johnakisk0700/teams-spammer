@@ -1,9 +1,8 @@
-import { fetchPersonalOpenPRsAndMore } from '../../bitbucket/client.ts';
+import { fetchGroupOpenPRs } from '../../bitbucket/client.ts';
 import { env } from '../../config/env.ts';
 import type { PrReviewSpammerJob } from '../../config/jobs.ts';
 import {
-  createNeedsQALines,
-  createNeedsReviewLines,
+  createPrLine,
   filterByApprovalThreshold,
   getMessageTitle,
   sendTeamsMessage,
@@ -16,38 +15,39 @@ export async function runGroupPrReviewSpammer(
   console.log(`[${name}] Running job...`);
 
   // 1. Fetch PRs
-  const pullRequests = await fetchPersonalOpenPRsAndMore(
+  const pullRequests = await fetchGroupOpenPRs(
     { baseUrl: env.BITBUCKET_HOST, apiToken: env.BITBUCKET_API_TOKEN },
     config.bitbucketUsers,
   );
 
-  const [needsReview, needsQa] = await filterByApprovalThreshold(pullRequests, config);
+  const prs = filterByApprovalThreshold(pullRequests, config);
 
-  if (!needsReview.length && !needsQa.length) {
+  if (!prs.length) {
     console.log(`[${name}] All PRs have enough approvals. Nothing to send.`);
     return;
   }
 
-  const needsReviewLines = createNeedsReviewLines(needsReview);
-  const needsQALines = createNeedsQALines(needsQa);
+  // Group by author slug
+  const bySlug = new Map<string, typeof prs>();
+  for (const entry of prs) {
+    const slug = entry.pr.author.user.slug ?? 'unknown';
+    if (!bySlug.has(slug)) bySlug.set(slug, []);
+    bySlug.get(slug)!.push(entry);
+  }
 
   const title = getMessageTitle(config.tone);
+  const userSections: string[] = [];
 
-  const needsReviewText = needsReviewLines.length
-    ? needsReviewLines.join('<br>')
-    : 'No PRs for code review.';
+  for (const [slug, userPrs] of bySlug) {
+    const displayName = userPrs[0]?.pr.author.user.displayName ?? slug;
+    const lines = [`<b>${displayName}:</b>`, ...userPrs.map(createPrLine)];
+    userSections.push(lines.join('<br>'));
+  }
 
-  const needsQaText = needsQALines
-    ? '<br>' + '<b>\u2705 Code reviewed \u2014 QA needed:</b>' + '<br>' + needsQALines.join('<br>')
-    : '';
-
-  const message = title + '<br>' + needsReviewText + needsQaText;
+  const message = title + '<br>' + userSections.join('<br><br>');
 
   // 5. Send the message to the target comms
   const { target } = config;
-  console.log('Message to be sent: \n', message);
-  return;
-
   await sendTeamsMessage(target, message);
 
   console.log(`[${name}] Sent!`);

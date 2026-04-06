@@ -39,8 +39,8 @@ export const jobs: Record<string, JobConfig> = {
   spam_team_branding_prs: {
     kind: 'group-pr-review-spammer',
     target: {
-      type: 'chat',
-      chatId: '19:638cb693931741fa83e07fe24c82dba0@thread.v2',
+      type: 'dm',
+      email: 'ext_gpelekanos@ringana.com',
     },
     bitbucketUsers: USER_SLUGS_LIST,
     tone: 'funny',
