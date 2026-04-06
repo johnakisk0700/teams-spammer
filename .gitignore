@@ -36,6 +36,8 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Teams auth token cache
 .teams-token.json
 
+# Vibes
+.claude
 
 # List of users
 USER-SLUGS-LIST.ts
