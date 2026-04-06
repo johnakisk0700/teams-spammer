@@ -29,5 +29,7 @@ while (start !== undefined) {
 
 console.log(`Found ${users.length} users:\n`);
 for (const user of users) {
-  console.log(`  slug: ${user.slug}  |  name: ${user.displayName}  |  email: ${user.emailAddress ?? '—'}`);
+  console.log(
+    `  slug: ${user.slug}  |  name: ${user.displayName}  |  email: ${user.emailAddress ?? '—'}`,
+  );
 }
