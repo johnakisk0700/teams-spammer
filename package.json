@@ -5,8 +5,6 @@
   "private": true,
   "scripts": {
     "start": "bun run src/index.ts",
-    "dm": "bun run src/index.ts dm",
-    "comms": "bun run src/index.ts to comms",
     "explore": "bun run src/teams-explore.ts"
   },
   "devDependencies": {

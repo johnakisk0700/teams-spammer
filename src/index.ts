@@ -1,156 +1,54 @@
-import { fetchOpenPullRequests } from './bitbucket/client.ts';
-import { getPullRequestLink } from './bitbucket/format.ts';
-import { getAccessToken } from './teams/auth.ts';
-import { sendChannelMessage, sendChatMessage, sendDirectMessage } from './teams/client.ts';
+import { jobs } from './config/jobs.ts';
 import { env } from './config/env.ts';
-import { targets } from './config/channels.ts';
-import { getRandomReviewTitle } from './review-title.ts';
+import { runJob } from './core/run-job.ts';
 
-type Target =
-  | { mode: 'dm'; email: string }
-  | { mode: 'channel'; teamId: string; channelId: string }
-  | { mode: 'chat'; chatId: string };
-
-type ParsedArgs = {
-  target: Target;
-  alsoSlug?: string;
-};
-
-function parseArgs(): ParsedArgs {
-  const args = Bun.argv.slice(2);
-
-  // Extract --also flag from anywhere in the args
-  let alsoSlug: string | undefined;
-  const filtered: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    if (args[i] === '--also' && args[i + 1]) {
-      alsoSlug = args[++i];
-    } else {
-      filtered.push(args[i]!);
-    }
-  }
-
-  const [mode, ...rest] = filtered;
-
-  if (mode === 'dm' && rest[0]) {
-    return { target: { mode: 'dm', email: rest[0] }, alsoSlug };
-  }
-
-  // Check predefined targets (channels or group chats)
-  if (mode === 'to' && rest[0]) {
-    const t = targets[rest[0]];
-    if (t) {
-      const target: Target =
-        t.type === 'chat'
-          ? { mode: 'chat', chatId: t.chatId }
-          : { mode: 'channel', teamId: t.teamId, channelId: t.channelId };
-      return { target, alsoSlug };
-    }
-
-    console.error(`Unknown target "${rest[0]}".`);
-    console.error(`Define it in src/config/channels.ts.\n`);
-  }
-
-  if (mode === 'channel' && rest[0] && rest[1]) {
-    return { target: { mode: 'channel', teamId: rest[0], channelId: rest[1] }, alsoSlug };
-  }
-
-  if (mode === 'chat' && rest[0]) {
-    return { target: { mode: 'chat', chatId: rest[0] }, alsoSlug };
-  }
-
-  const aliases = Object.keys(targets);
-  const aliasHelp = aliases.length
-    ? `\nPredefined targets:\n${aliases.map((a) => `  - ${a}`).join('\n')}\n`
-    : '\nNo predefined targets yet. Add them in src/config/channels.ts\n';
-
-  console.error(`Usage:
-  bun run start dm <email>                     Send a DM to a user
-  bun run start to <alias>                     Send to a predefined target
-  bun run start channel <teamId> <channelId>   Post to a channel by IDs
-  bun run start chat <chatId>                  Post to a group chat by ID
-
-Options:
-  --also <slug>   Also include PRs by another Bitbucket user
-${aliasHelp}
-Tip: use "bun run explore" to discover IDs.`);
-  process.exit(1);
+function formatInterval(ms: number): string {
+  const minutes = Math.round(ms / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rem = minutes % 60;
+  return rem ? `${hours}h${rem}m` : `${hours}h`;
 }
 
-async function main(): Promise<void> {
-  const { target, alsoSlug } = parseArgs();
+// Schedule all jobs
+const jobEntries = Object.entries(jobs);
 
-  if (alsoSlug) {
-    console.log(`Also including PRs by "${alsoSlug}"...\n`);
+if (jobEntries.length === 0) {
+  console.warn('No jobs configured. Add jobs in src/config/jobs.ts');
+} else {
+  for (const [name, config] of jobEntries) {
+    console.log(`Scheduling "${name}" every ${formatInterval(config.intervalMs)}`);
+
+    // Run immediately on startup
+    runJob(name, config).catch((err) => {
+      console.error(`[${name}] Failed:`, err);
+    });
+
+    // Then on interval
+    setInterval(() => {
+      runJob(name, config).catch((err) => {
+        console.error(`[${name}] Failed:`, err);
+      });
+    }, config.intervalMs);
   }
-
-  const pullRequests = await fetchOpenPullRequests(
-    { baseUrl: env.BITBUCKET_HOST, apiToken: env.BITBUCKET_API_TOKEN },
-    alsoSlug,
-  );
-
-  const threshold = env.APPROVAL_THRESHOLD;
-  const QA_THRESHOLD = 2;
-
-  const prsWithApprovals = pullRequests.map((pr) => {
-    const approvals = pr.reviewers.filter(
-      (r) => r.approved && r.user.slug !== pr.author.user.slug,
-    ).length;
-    return { pr, approvals };
-  });
-
-  const needsReview = prsWithApprovals.filter((p) => p.approvals < QA_THRESHOLD);
-  const needsQa = prsWithApprovals.filter(
-    (p) => p.approvals >= QA_THRESHOLD && p.approvals < threshold,
-  );
-
-  if (needsReview.length === 0 && needsQa.length === 0) {
-    console.log('All PRs have enough approvals. Nothing to send!');
-    return;
-  }
-
-  const lines: string[] = [];
-
-  if (needsReview.length > 0) {
-    console.log(`${needsReview.length} PRs needing review:`);
-    for (const { pr, approvals } of needsReview) {
-      const link = getPullRequestLink(pr);
-      console.log(`  - #${pr.id} ${pr.title} (${approvals}/${QA_THRESHOLD} approvals)`);
-      lines.push(
-        `\u2022 <a href="${link}">#${pr.id} ${pr.title}</a> \u2014 ${approvals}/${QA_THRESHOLD} approvals`,
-      );
-    }
-  }
-
-  if (needsQa.length > 0) {
-    console.log(`${needsQa.length} PRs needing QA:`);
-    lines.push('', '<b>\u2705 Code reviewed \u2014 QA needed:</b>');
-    for (const { pr, approvals } of needsQa) {
-      const link = getPullRequestLink(pr);
-      console.log(`  - #${pr.id} ${pr.title} (${approvals}/${threshold} \u2014 QA needed)`);
-      lines.push(
-        `\u2022 <a href="${link}">#${pr.id} ${pr.title}</a> \u2014 ${approvals}/${threshold} approvals \u2014 QA needed`,
-      );
-    }
-  }
-
-  const title = getRandomReviewTitle();
-  const message = `<b>${title}:</b><br>${lines.join('<br>')}`;
-
-  const token = await getAccessToken(env.TEAMS_TENANT_ID, env.TEAMS_CLIENT_ID);
-
-  if (target.mode === 'dm') {
-    console.log(`\nSending DM to ${target.email}...`);
-    await sendDirectMessage(token, target.email, message);
-  } else if (target.mode === 'channel') {
-    console.log(`\nPosting to channel ${target.channelId}...`);
-    await sendChannelMessage(token, target.teamId, target.channelId, message);
-  } else {
-    console.log(`\nPosting to group chat ${target.chatId}...`);
-    await sendChatMessage(token, target.chatId, message);
-  }
-
-  console.log('Sent!');
 }
 
-await main();
+// Health check / future webhook server
+const port = env.PORT;
+
+Bun.serve({
+  port,
+  fetch(req) {
+    const url = new URL(req.url);
+
+    switch (url.pathname) {
+      case '/health':
+        const jobs = jobEntries.map(([name]) => name);
+        return Response.json({ status: 'ok', jobs });
+      default:
+        return new Response('Not found', { status: 404 });
+    }
+  },
+});
+
+console.log(`Server listening on port ${port}`);

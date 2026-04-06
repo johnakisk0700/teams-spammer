@@ -1,3 +1,6 @@
+import { env } from '../config/env';
+import { getAccessToken } from './auth';
+
 type GraphTeam = {
   id: string;
   displayName: string;
@@ -21,12 +24,21 @@ type GraphResponse<T> = {
   value: T[];
 };
 
-async function graphFetch<T>(accessToken: string, path: string, method = "GET", body?: unknown): Promise<T> {
+async function getTeamsToken() {
+  return await getAccessToken(env.TEAMS_TENANT_ID, env.TEAMS_CLIENT_ID);
+}
+
+async function graphFetch<T>(
+  accessToken: string,
+  path: string,
+  method = 'GET',
+  body?: unknown,
+): Promise<T> {
   const res = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
     body: body ? JSON.stringify(body) : undefined,
   });
@@ -40,17 +52,20 @@ async function graphFetch<T>(accessToken: string, path: string, method = "GET", 
 }
 
 export async function listMyTeams(accessToken: string): Promise<GraphTeam[]> {
-  const res = await graphFetch<GraphResponse<GraphTeam>>(accessToken, "/me/joinedTeams");
+  const res = await graphFetch<GraphResponse<GraphTeam>>(accessToken, '/me/joinedTeams');
   return res.value;
 }
 
 export async function listChannels(accessToken: string, teamId: string): Promise<GraphChannel[]> {
-  const res = await graphFetch<GraphResponse<GraphChannel>>(accessToken, `/teams/${teamId}/channels`);
+  const res = await graphFetch<GraphResponse<GraphChannel>>(
+    accessToken,
+    `/teams/${teamId}/channels`,
+  );
   return res.value;
 }
 
 export async function listTeamMembers(accessToken: string, teamId: string): Promise<GraphUser[]> {
-  const res = await graphFetch<GraphResponse<GraphUser & { "@odata.type"?: string }>>(
+  const res = await graphFetch<GraphResponse<GraphUser & { '@odata.type'?: string }>>(
     accessToken,
     `/teams/${teamId}/members`,
   );
@@ -63,59 +78,56 @@ export async function listTeamMembers(accessToken: string, teamId: string): Prom
 }
 
 export async function sendChannelMessage(
-  accessToken: string,
   teamId: string,
   channelId: string,
   messageHtml: string,
 ): Promise<void> {
-  await graphFetch(accessToken, `/teams/${teamId}/channels/${channelId}/messages`, "POST", {
+  const accessToken = await getTeamsToken();
+  await graphFetch(accessToken, `/teams/${teamId}/channels/${channelId}/messages`, 'POST', {
     body: {
-      contentType: "html",
+      contentType: 'html',
       content: messageHtml,
     },
   });
 }
 
 export async function sendDirectMessage(
-  accessToken: string,
   recipientEmail: string,
   messageHtml: string,
 ): Promise<void> {
+  const accessToken = await getTeamsToken();
   const me = await getMe(accessToken);
 
-  const chat = await graphFetch<{ id: string }>(accessToken, "/chats", "POST", {
-    chatType: "oneOnOne",
+  const chat = await graphFetch<{ id: string }>(accessToken, '/chats', 'POST', {
+    chatType: 'oneOnOne',
     members: [
       {
-        "@odata.type": "#microsoft.graph.aadUserConversationMember",
-        roles: ["owner"],
-        "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${me.id}')`,
+        '@odata.type': '#microsoft.graph.aadUserConversationMember',
+        roles: ['owner'],
+        'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${me.id}')`,
       },
       {
-        "@odata.type": "#microsoft.graph.aadUserConversationMember",
-        roles: ["owner"],
-        "user@odata.bind": `https://graph.microsoft.com/v1.0/users('${recipientEmail}')`,
+        '@odata.type': '#microsoft.graph.aadUserConversationMember',
+        roles: ['owner'],
+        'user@odata.bind': `https://graph.microsoft.com/v1.0/users('${recipientEmail}')`,
       },
     ],
   });
 
   // Send message in chat
-  await graphFetch(accessToken, `/chats/${chat.id}/messages`, "POST", {
+  await graphFetch(accessToken, `/chats/${chat.id}/messages`, 'POST', {
     body: {
-      contentType: "html",
+      contentType: 'html',
       content: messageHtml,
     },
   });
 }
 
-export async function sendChatMessage(
-  accessToken: string,
-  chatId: string,
-  messageHtml: string,
-): Promise<void> {
-  await graphFetch(accessToken, `/chats/${chatId}/messages`, "POST", {
+export async function sendChatMessage(chatId: string, messageHtml: string): Promise<void> {
+  const accessToken = await getTeamsToken();
+  await graphFetch(accessToken, `/chats/${chatId}/messages`, 'POST', {
     body: {
-      contentType: "html",
+      contentType: 'html',
       content: messageHtml,
     },
   });
@@ -124,16 +136,16 @@ export async function sendChatMessage(
 export type GraphChat = {
   id: string;
   topic: string | null;
-  chatType: "oneOnOne" | "group" | "meeting";
+  chatType: 'oneOnOne' | 'group' | 'meeting';
 };
 
 export async function listMyChats(accessToken: string): Promise<GraphChat[]> {
-  const res = await graphFetch<GraphResponse<GraphChat>>(accessToken, "/me/chats?$top=50");
+  const res = await graphFetch<GraphResponse<GraphChat>>(accessToken, '/me/chats?$top=50');
   return res.value;
 }
 
 export async function listChatMembers(accessToken: string, chatId: string): Promise<GraphUser[]> {
-  const res = await graphFetch<GraphResponse<GraphUser & { "@odata.type"?: string }>>(
+  const res = await graphFetch<GraphResponse<GraphUser & { '@odata.type'?: string }>>(
     accessToken,
     `/chats/${chatId}/members`,
   );
@@ -146,5 +158,5 @@ export async function listChatMembers(accessToken: string, chatId: string): Prom
 }
 
 export async function getMe(accessToken: string): Promise<GraphUser> {
-  return graphFetch<GraphUser>(accessToken, "/me");
+  return graphFetch<GraphUser>(accessToken, '/me');
 }

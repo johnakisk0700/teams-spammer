@@ -1,4 +1,4 @@
-const DASHBOARD_PULL_REQUESTS_PATH = "/rest/api/1.0/dashboard/pull-requests";
+const DASHBOARD_PULL_REQUESTS_PATH = '/rest/api/1.0/dashboard/pull-requests';
 
 export type BitbucketClientConfig = {
   baseUrl: string;
@@ -40,15 +40,12 @@ export type BitbucketPullRequest = {
   links?: BitbucketLinks;
 };
 
-export async function bitbucketFetch<T>(
-  config: BitbucketClientConfig,
-  path: string,
-): Promise<T> {
+export async function bitbucketFetch<T>(config: BitbucketClientConfig, path: string): Promise<T> {
   const url = new URL(path, config.baseUrl);
 
   const response = await fetch(url, {
     headers: {
-      Accept: "application/json",
+      Accept: 'application/json',
       Authorization: `Bearer ${config.apiToken}`,
     },
   });
@@ -60,36 +57,80 @@ export async function bitbucketFetch<T>(
   return (await response.json()) as T;
 }
 
-export async function fetchOpenPullRequests(
+export async function fetchPersonalOpenPRsAndMore(
   config: BitbucketClientConfig,
-  alsoAuthorSlug?: string,
+  userSlugs?: string[],
 ): Promise<BitbucketPullRequest[]> {
   const allPrs: BitbucketPullRequest[] = [];
+  const seen = new Set<number>();
 
-  // Always fetch our own PRs
-  let start: number | undefined = 0;
-  while (start !== undefined) {
-    const path = `${DASHBOARD_PULL_REQUESTS_PATH}?state=OPEN&role=AUTHOR&start=${start}`;
-    const page = await bitbucketFetch<BitbucketPagedResponse<BitbucketPullRequest>>(config, path);
-    allPrs.push(...page.values);
-    start = page.isLastPage ? undefined : page.nextPageStart;
+  function addUnique(prs: BitbucketPullRequest[]) {
+    for (const pr of prs) {
+      if (!seen.has(pr.id)) {
+        seen.add(pr.id);
+        allPrs.push(pr);
+      }
+    }
   }
 
-  // Optionally also include another user's PRs (ones we're involved in)
-  if (alsoAuthorSlug) {
-    const seen = new Set(allPrs.map((pr) => pr.id));
+  // Fetch our own PRs (always)
+  let start: number | undefined = 0;
+  while (start !== undefined) {
+    const p: string = `${DASHBOARD_PULL_REQUESTS_PATH}?state=OPEN&role=AUTHOR&start=${start}`;
+    const pg: BitbucketPagedResponse<BitbucketPullRequest> = await bitbucketFetch(config, p);
+    addUnique(pg.values);
+    start = pg.isLastPage ? undefined : pg.nextPageStart;
+  }
+
+  // Also include PRs by specific users
+  if (userSlugs && userSlugs.length > 0) {
+    const slugSet = new Set(userSlugs);
     let otherStart: number | undefined = 0;
     while (otherStart !== undefined) {
       const p: string = `${DASHBOARD_PULL_REQUESTS_PATH}?state=OPEN&start=${otherStart}`;
       const pg: BitbucketPagedResponse<BitbucketPullRequest> = await bitbucketFetch(config, p);
-      for (const pr of pg.values) {
-        if (pr.author.user.slug === alsoAuthorSlug && !seen.has(pr.id)) {
-          allPrs.push(pr);
-          seen.add(pr.id);
-        }
-      }
+      addUnique(
+        pg.values.filter((pr: BitbucketPullRequest) => slugSet.has(pr.author.user.slug ?? '')),
+      );
       otherStart = pg.isLastPage ? undefined : pg.nextPageStart;
     }
+  }
+
+  return allPrs;
+}
+
+export async function fetchGroupOpenPRs(
+  config: BitbucketClientConfig,
+  userSlugs?: string[],
+): Promise<BitbucketPullRequest[]> {
+  const allPrs: BitbucketPullRequest[] = [];
+  if (userSlugs && userSlugs.length > 0) {
+    const slugSet = new Set(userSlugs);
+    let otherStart: number | undefined = 0;
+    while (otherStart !== undefined) {
+      const p: string = `${DASHBOARD_PULL_REQUESTS_PATH}?state=OPEN&start=${otherStart}`;
+      const pg: BitbucketPagedResponse<BitbucketPullRequest> = await bitbucketFetch(config, p);
+      allPrs.push(
+        ...pg.values.filter((pr: BitbucketPullRequest) => slugSet.has(pr.author.user.slug ?? '')),
+      );
+      otherStart = pg.isLastPage ? undefined : pg.nextPageStart;
+    }
+  }
+
+  return allPrs;
+}
+
+export async function fetchPersonalOpenPRs(
+  config: BitbucketClientConfig,
+): Promise<BitbucketPullRequest[]> {
+  const allPrs: BitbucketPullRequest[] = [];
+
+  let start: number | undefined = 0;
+  while (start !== undefined) {
+    const p: string = `${DASHBOARD_PULL_REQUESTS_PATH}?state=OPEN&role=AUTHOR&start=${start}`;
+    const pg: BitbucketPagedResponse<BitbucketPullRequest> = await bitbucketFetch(config, p);
+    allPrs.push(...pg.values);
+    start = pg.isLastPage ? undefined : pg.nextPageStart;
   }
 
   return allPrs;
