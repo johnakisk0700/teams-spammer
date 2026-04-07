@@ -89,13 +89,17 @@ export async function getAccessToken(tenantId: string, clientId: string): Promis
 
   // Try refresh
   if (cached?.refresh_token) {
-    const { ok, json } = await postForm(msUrl(tenantId, 'token'), {
-      client_id: clientId,
-      grant_type: 'refresh_token',
-      refresh_token: cached.refresh_token,
-      scope: SCOPES,
-    });
-    if (ok) return saveToken(json);
+    try {
+      const { ok, json } = await postForm(msUrl(tenantId, 'token'), {
+        client_id: clientId,
+        grant_type: 'refresh_token',
+        refresh_token: cached.refresh_token,
+        scope: SCOPES,
+      });
+      if (ok) return saveToken(json);
+    } catch {
+      // Refresh token expired or invalid — fall through to device code login
+    }
   }
 
   // Full login
