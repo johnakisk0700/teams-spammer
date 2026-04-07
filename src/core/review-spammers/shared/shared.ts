@@ -71,9 +71,9 @@ export function createPrLine(entry: PRWithStatus): string {
   const link = getPullRequestLink(pr);
   const hearts = reviewHearts(approvals, env.QA_THRESHOLD);
   if (status === 'review') {
-    return `\uD83D\uDD0D \u23D0 ${hearts} \u25B8 \u26AA \u2014 <a href="${link}">#${pr.id} ${pr.title}</a>`;
+    return `${hearts} \u25B8 \u26AA \u2014 <a href="${link}">#${pr.id} ${pr.title}</a>`;
   }
   const qaApprovals = approvals - env.QA_THRESHOLD;
   const qaSlot = qaApprovals > 0 ? '\uD83D\uDFE2' : '\uD83D\uDFE1';
-  return `\uD83E\uDDEA \u23D0 ${hearts} \u25B8 ${qaSlot} \u2014 <a href="${link}">#${pr.id} ${pr.title}</a>`;
+  return `${hearts} \u25B8 ${qaSlot} \u2014 <a href="${link}">#${pr.id} ${pr.title}</a>`;
 }
